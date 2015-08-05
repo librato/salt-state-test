@@ -129,7 +129,9 @@ options = ConfObj({'output_file_append': False,
           'versions_report': None,
           'retcode_passthrough': False,
           'output': None,
-          'log_file': '/tmp/salt/log'})
+          'log_file': '/tmp/salt/log',
+          'test_conf_dir': '', # Set this once our CWD is determined
+})
 
 config = {
     'output_file_append': False,
@@ -177,8 +179,6 @@ config = {
     'returner_dirs': [],
     'gitfs_privkey': '',
     'tcp_keepalive': True,
-#    'arg': ['chatbot',
-#            'grains={ "target_pillars" : ["chatbot"] }'],
     'log_datefmt_logfile': '%Y-%m-%d %H:%M:%S',
     'config_dir': '/tmp/salt',
     'random_reauth_delay': 10,
@@ -188,7 +188,6 @@ config = {
     'gitfs_user': '',
     'fileserver_limit_traversal': False,
     'tcp_keepalive_intvl': -1,
-    'conf_file': '/tmp/salt/minion',
     'pillar_root': '.',
     'top_file': '',
     'zmq_monitor': False,
@@ -208,7 +207,6 @@ config = {
     'default_include': 'minion.d/*.conf',
     'hard_crash': False,
     'rejected_retry': False,
-#    'file_root': '../../',
     'state_events': False,
     'environment': None,
     'win_repo_cachefile': 'salt://win/repo/winrepo.p',
@@ -357,8 +355,13 @@ class LocalCaller(object):
         # Handle this here so other deeper code which might
         # be imported as part of the salt api doesn't do  a
         # nasty sys.exit() and tick off our developer users
+        global options
         try:
+            # grains get loaded below
+            # via salt.minion.SMinion, then via salt.loader.grains()
             self.minion = salt.minion.SMinion(config)
+            # Then we can overwrite it
+            self.minion.opts['grains'] = get_grains_from_file("{}/grains.json".format(options.test_conf_dir))
         except SaltClientError as exc:
             raise SystemExit(str(exc))
 
@@ -378,6 +381,9 @@ class LocalCaller(object):
             'pid': os.getpid(),
             'jid': ret['jid'],
             'tgt': 'salt-call'}
+
+        # Args are sanitized or whateverhere, and pillars and
+        # grains need to be added back at this point as well
         args, kwargs = salt.minion.load_args_and_kwargs(
             self.minion.functions[fun],
             salt.utils.args.parse_input(self.config['arg']),
@@ -389,9 +395,13 @@ class LocalCaller(object):
             print("Couldn't load sls test pillar file {}".format(pillar_file))
             kwargs['pillar'] = dict()
 
+
         func = self.minion.functions[fun]
+
+        kwargs['options'] = self.config
+
         try:
-            ret['return'] = func(*args, **kwargs)
+            ret['return'] = test_show_sls(func, *args, **kwargs)
         except TypeError as exc:
             trace = traceback.format_exc()
             raise ValueError, 'Passed invalid arguments: {0}\n'.format(exc)
@@ -401,6 +411,46 @@ class LocalCaller(object):
         except AttributeError:
             ret['retcode'] = 1
         return ret
+
+
+def test_show_sls(func, mods, saltenv='base', test=None, queue=False, **kwargs):
+    '''
+    The salt.state.show_sls() doesn't provide a way to pass in grains,
+    it'll only read them from a minion config if that option is
+    provided.  So we will override that specific behavior here.
+
+    Display the state data from a specific sls or list of sls files on the
+    master. The default environment is ``base``, use ``saltenv`` (``env`` in
+    Salt 0.17.x and older) to specify a different environment.
+
+    This function does not support topfiles.  For ``top.sls`` please use
+    ``show_top`` instead.
+
+    Custom Pillar data can be passed with the ``pillar`` kwarg.
+
+    A custom options dictionary (including grains) can be passed with the ``options`` kwarg.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' state.show_sls core,edit.vim dev
+    '''
+    opts = kwargs.get('options', {})
+
+    pillar = kwargs.get('pillar')
+
+    st_ = salt.state.HighState(opts, pillar)
+    st_.push_active()
+    try:
+        high_, errors = st_.render_highstate({saltenv: [mods]})
+    finally:
+        st_.pop_active()
+    errors += st_.state.verify_high(high_)
+
+    if errors:
+        return errors
+    return high_
 
 
 def check_single_state(state):
@@ -430,10 +480,15 @@ def print_state_json(state):
     """
     Print out the json representaiton of the state to use as a test result
     """
+    global config
     config['arg'] = [state[0]]
     config['state_test_dir'] = "{}/test".format(os.path.abspath(os.path.dirname(state[1])))
     call_result = salt_call()
     print(json.dumps(call_result['return'], sort_keys=True, indent=4))
+
+
+def get_grains_from_file(fname):
+    return json.load(open(fname))
 
 
 def set_config_and_grains():
@@ -448,11 +503,10 @@ def set_config_and_grains():
     global options
     # The directory where this script lives, and where config will be
     test_conf_dir = os.path.abspath(os.path.dirname(sys.argv[0]))
+    options.test_conf_dir = test_conf_dir
     with open('{}/config.json'.format(test_conf_dir)) as conf_fh:
         test_conf = json.load(conf_fh)
-    with open('{}/grains.json'.format(test_conf_dir)) as grains_fh:
-        # seed the config object with the default grains, fail without
-        config['grains'] = json.load(grains_fh)
+    config['grains'] = get_grains_from_file('{}/grains.json'.format(test_conf_dir))
 
     # Configure the file_roots now that we have our configuration loaded
     options.file_root = os.path.abspath("{}/../{}".format(test_conf_dir, test_conf['states_dir']))

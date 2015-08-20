@@ -1,3 +1,8 @@
+# Depenencies
+
+This is primarily used with python 2.7.10 and saltstack 2015.5.4, and
+deepdiff version 0.5.4.
+
 # Setting up tests for your state files.
 
 The unit testing we have for salt states tests whether a salt 

@@ -464,13 +464,13 @@ def test_show_sls(func, mods, saltenv='base', test=None, queue=False, **kwargs):
     return high_
 
 
-def check_single_state(state):
+def check_single_state(state, test_all_keys):
     '''
     state is a tuple of state name, and path to the state in the repo
     '''
-    config['arg'] = [state[0]]
+    config['arg']            = [state[0]]
     config['state_test_dir'] = "{}/test".format(os.path.abspath(os.path.dirname(state[1])))
-    call_result = salt_call()
+    call_result              = salt_call()
 
     # Given path/to/somestate.sls, create path/to/test/somestate.json
     state_name = state[1].split("/")[-1].split('.')[0]
@@ -479,7 +479,18 @@ def check_single_state(state):
     test_result = json.loads(json.dumps(call_result['return']))
     desired_result = json.load(open(desired_filename))
 
-    comparison = DeepDiff(test_result, desired_result)
+    if not 'items' in dir(test_result):
+        # We have failed to have a successful state run.
+        print("{} failed: {}".format(state[0], test_result))
+        return(1, test_result)
+
+
+    if not test_all_keys:
+        in_test = {k:v for k, v in test_result.items() if k in desired_result.keys()}
+    else:
+        in_test = test_result
+
+    comparison = DeepDiff(in_test, desired_result)
     if comparison:
         print("{} failed".format(state[0]))
         print(comparison)
@@ -528,36 +539,32 @@ def main():
     """
     Test a state.
     """
-    accumulated_rc = 0
-    test_conf = set_config_and_grains()
-
-
+    accumulated_rc  = 0
+    test_conf       = set_config_and_grains()
+    test_all_keys   = False
+    print_one_json  = False
     statedir_offset = len(test_conf['states_dir'])
+    args = sys.argv[1:]
 
-    if len(sys.argv) > 1:
-        for arg in sys.argv:
+    if len(args) > 0:
+        for arg in [a for a in args if a[0] == "-"]:
             if arg == '-h':
                 exit_usage()
-
             if arg == '-t':
                 test_all_keys = True
-            else:
-                test_all_keys = False
             if arg == '-j': # print json instead of testing
                 print_one_json = True
-            else:
-                state_paths = sys.argv[1:]
 
-            # list of (state, relative path)
-            states_list = [(s.replace("/", ".")[statedir_offset:-4], s) for s in state_paths
-                           if s.startswith(test_conf['states_dir'])]
+        state_paths = [a for a in args if a[0] != "-"]
+        # list of (state, relative path)
+        states_list = [(s.replace("/", ".")[statedir_offset:-4], s) for s in state_paths
+                       if s.startswith(test_conf['states_dir'])]
+        if print_one_json:
+            print_state_json(states_list[0])
+        else:
             for s in states_list:
-                if sys.argv[1] == '-j':
-                    print_state_json(s) # Do no checking
-                    break # and only process one state, and only produce one document
-                else:
-                    retcode, _ = check_single_state(s, test_all_keys)
-                    accumulated_rc += retcode
+                retcode, _ = check_single_state(s, test_all_keys)
+                accumulated_rc += retcode
     else:
         sys.exit(0)
     # Be exhaustive and check all of the configuration(s)

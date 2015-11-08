@@ -142,3 +142,8 @@ $ python test/test_salt_state.py -j  states/state1/init.sls \
   > states/state1/test/init.json
 ```
 
+### Testing more thoroughly
+
+To see the complete set of adds and deletes, not just those that are in
+the expected results files, you can pass in the ```-t``` flag to the test
+

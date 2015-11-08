@@ -346,11 +346,11 @@ class LocalCaller(object):
     Object to wrap the calling of local salt modules for testing
     Stripping down bits of the ZeroMQCaller
     '''
-    def __init__(self, config):
+    def __init__(self, this_config):
         '''
         Pass in the command line options
         '''
-        self.config = config
+        self.config = this_config
         self.serial = salt.payload.Serial(self.config)
         # Handle this here so other deeper code which might
         # be imported as part of the salt api doesn't do  a
@@ -392,7 +392,7 @@ class LocalCaller(object):
         try:
             kwargs['pillar'] = json.load(open(pillar_file))
         except IOError as ioe:
-            print("Couldn't load sls test pillar file {}".format(pillar_file))
+            print("Couldn't load sls test pillar file {} because {}".format(pillar_file, ioe))
             kwargs['pillar'] = dict()
 
 

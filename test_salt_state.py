@@ -1,6 +1,13 @@
 #!/usr/bin/env python
 
 
+"""
+Unit tests a salt state.
+
+This requires a json document that will be used as the grains,
+and another one specific to the pillars.
+"""
+
 from __future__ import absolute_import
 
 # Import python libs
@@ -29,7 +36,7 @@ import salt.cli.caller
 from deepdiff import DeepDiff
 
 
-usage='''{} [-j] <state1> [state2, state3, etc.]
+USAGE = '''{} [-j] <state1> [state2, state3, etc.]
 
   -j prints json of the first state provided and then exits.
 
@@ -95,43 +102,47 @@ from salt.exceptions import (
 log = logging.getLogger(__name__)
 
 class ConfObj(object):
+    """
+    A configuration object that turns dictionary data into attributes to satisfy
+    various salt APIs.
+    """
     def __init__(self, conf_dict):
-        for k,v in conf_dict.items():
-            setattr(self, k, v)
+        for key, val in conf_dict.items():
+            setattr(self, key, val)
     def __setatrr__(self, name, val):
         setattr(self, name, val)
 
 
-options = ConfObj({'output_file_append': False,
-          'saltfile': None,
-          'state_output': 'full',
-          'force_color': False,
-          'skip_grains': False,
-          'config_dir': '/tmp/salt',
-          'id': 'foo',
-          'output_indent': None,
-          'log_level': 'info',
-          'output_file': None,
-          'module_dirs': [],
-          'master': 'salt',
-          'log_level_logfile': None,
-          'local': True,
-          'metadata': False,
-          'return': '',
-          'no_color': False,
-          'pillar_root': '.',
-          'hard_crash': False,
-#          'file_root': '../../',
-          'auth_timeout': 60,
-          'refresh_grains_cache': False,
-          'doc': False,
-          'grains_run': False,
-          'versions_report': None,
-          'retcode_passthrough': False,
-          'output': None,
-          'log_file': '/tmp/salt/log',
-          'test_conf_dir': '', # Set this once our CWD is determined
-})
+options = ConfObj(
+    {'output_file_append': False,
+     'saltfile': None,
+     'state_output': 'full',
+     'force_color': False,
+     'skip_grains': False,
+     'config_dir': '/tmp/salt',
+     'id': 'foo',
+     'output_indent': None,
+     'log_level': 'info',
+     'output_file': None,
+     'module_dirs': [],
+     'master': 'salt',
+     'log_level_logfile': None,
+     'local': True,
+     'metadata': False,
+     'return': '',
+     'no_color': False,
+     'pillar_root': '.',
+     'hard_crash': False,
+     'auth_timeout': 60,
+     'refresh_grains_cache': False,
+     'doc': False,
+     'grains_run': False,
+     'versions_report': None,
+     'retcode_passthrough': False,
+     'output': None,
+     'log_file': '/tmp/salt/log',
+     'test_conf_dir': '', # Set this once our CWD is determined
+    })
 
 config = {
     'output_file_append': False,
@@ -333,7 +344,7 @@ def salt_call():
     except KeyboardInterrupt as err:
         trace = traceback.format_exc()
         try:
-            hardcrash = client.options.hard_crash
+            hardcrash = options.hard_crash
         except (AttributeError, KeyError):
             hardcrash = False
         _handle_interrupt(
@@ -372,17 +383,17 @@ class LocalCaller(object):
         ret = {}
         fun = self.config['fun']
         ret['jid'] = '{0:%Y%m%d%H%M%S%f}'.format(datetime.datetime.now())
-        proc_fn = os.path.join(
-            salt.minion.get_proc_dir(self.config['cachedir']),
-            ret['jid']
-        )
+        # proc_fn = os.path.join(
+        #     salt.minion.get_proc_dir(self.config['cachedir']),
+        #     ret['jid']
+        # )
         sdata = {
             'fun': fun,
             'pid': os.getpid(),
             'jid': ret['jid'],
             'tgt': 'salt-call'}
 
-        # Args are sanitized or whateverhere, and pillars and
+        # Args are sanitized or whatever here, and pillars and
         # grains need to be added back at this point as well
         args, kwargs = salt.minion.load_args_and_kwargs(
             self.minion.functions[fun],
@@ -404,7 +415,7 @@ class LocalCaller(object):
             ret['return'] = test_show_sls(func, *args, **kwargs)
         except TypeError as exc:
             trace = traceback.format_exc()
-            raise ValueError, 'Passed invalid arguments: {0}\n'.format(exc)
+            raise ValueError, 'Passed invalid arguments: {0}\n{1}'.format(exc, trace)
         try:
             ret['retcode'] = sys.modules[
                 func.__module__].__context__.get('retcode', 0)
@@ -514,6 +525,9 @@ def set_config_and_grains():
     return test_conf
 
 def main():
+    """
+    Test a state.
+    """
     accumulated_rc = 0
     test_conf = set_config_and_grains()
 
@@ -521,31 +535,39 @@ def main():
     statedir_offset = len(test_conf['states_dir'])
 
     if len(sys.argv) > 1:
-        if sys.argv[1] == '-h':
-            exit_usage()
+        for arg in sys.argv:
+            if arg == '-h':
+                exit_usage()
 
-        if sys.argv[1] == '-j': # print json instead of testing
-            state_paths = sys.argv[2:]
-        else:
-            state_paths = sys.argv[1:]
-
-        # list of (state, relative path)
-        states_list = [ (s.replace("/", ".")[statedir_offset:-4], s) for s in state_paths
-                        if s.startswith(test_conf['states_dir'])]
-        for s in states_list:
-            if sys.argv[1] == '-j':
-                print_state_json(s) # Do no checking
-                break # and only process one state, and only produce one document
+            if arg == '-t':
+                test_all_keys = True
             else:
-                retcode, retval = check_single_state(s)
-                accumulated_rc += retcode
+                test_all_keys = False
+            if arg == '-j': # print json instead of testing
+                print_one_json = True
+            else:
+                state_paths = sys.argv[1:]
+
+            # list of (state, relative path)
+            states_list = [(s.replace("/", ".")[statedir_offset:-4], s) for s in state_paths
+                           if s.startswith(test_conf['states_dir'])]
+            for s in states_list:
+                if sys.argv[1] == '-j':
+                    print_state_json(s) # Do no checking
+                    break # and only process one state, and only produce one document
+                else:
+                    retcode, _ = check_single_state(s, test_all_keys)
+                    accumulated_rc += retcode
     else:
         sys.exit(0)
     # Be exhaustive and check all of the configuration(s)
     sys.exit(accumulated_rc) # git likes 0, git rejects non-zero
 
 def exit_usage():
-    print(usage)
+    """
+    Let the uninformed caller know what they're missing.
+    """
+    print(USAGE)
     sys.exit(2)
 
 

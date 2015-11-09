@@ -8,8 +8,6 @@ This requires a json document that will be used as the grains,
 and another one specific to the pillars.
 """
 
-from __future__ import absolute_import
-
 # Import python libs
 from __future__ import print_function
 import os
@@ -17,23 +15,15 @@ import sys
 import traceback
 import logging
 import datetime
-import traceback
-import multiprocessing
 import json
 
-import threading
-import time
-from random import randint
+# Import salt libs
 
-# These imports came from salt/cli/call.py
-from salt.utils import parsers
-from salt.utils.verify import verify_env, verify_files
-from salt.config import _expand_glob_path
+# Custom exceptions
+from salt.exceptions import SaltClientError # pylint: disable=import-error,no-name-in-module
+import salt.cli.call # pylint: disable=import-error,no-name-in-module
 
-import salt.cli.call
-import salt.cli.caller
-
-from deepdiff import DeepDiff
+from deepdiff import DeepDiff # pylint: disable=import-error,no-name-in-module
 
 
 USAGE = '''{} [-j] <state1> [state2, state3, etc.]
@@ -87,21 +77,13 @@ exit $RV
 
 '''.format(os.path.basename(sys.argv[0]))
 
-# Import salt libs
-from salt.exceptions import SaltSystemExit, SaltClientError, SaltReqTimeoutError
-import salt.defaults.exitcodes  # pylint: disable=unused-import
 
-# Custom exceptions
-from salt.exceptions import (
-    SaltClientError,
-    CommandNotFoundError,
-    CommandExecutionError,
-    SaltInvocationError,
-)
+# Don't worry about whitespaces between e.g. initial var assignments
+# pylint: disable=bad-whitespace
 
 log = logging.getLogger(__name__)
 
-class ConfObj(object):
+class ConfObj(object):  # pylint: disable=too-few-public-methods
     """
     A configuration object that turns dictionary data into attributes to satisfy
     various salt APIs.
@@ -113,7 +95,7 @@ class ConfObj(object):
         setattr(self, name, val)
 
 
-options = ConfObj(
+OPTIONS = ConfObj(
     {'output_file_append': False,
      'saltfile': None,
      'state_output': 'full',
@@ -144,7 +126,8 @@ options = ConfObj(
      'test_conf_dir': '', # Set this once our CWD is determined
     })
 
-config = {
+# pylint: disable=line-too-long
+CONFIG = {
     'output_file_append': False,
     'ioflo_realtime': True,
     'master_alive_interval': 0,
@@ -311,6 +294,7 @@ config = {
     'log_file': '/tmp/salt/log',
     'gitfs_remotes': [],
     'gitfs_mountpoint': ''}
+# pylint: enable=line-too-long
 
 def _handle_interrupt(exc, original_exc, hardfail=False, trace=''):
     '''
@@ -333,18 +317,16 @@ def salt_call():
     '''
     Directly call state.show_sls via the same mechanism as salt-call
     '''
-    global config
-    global options
     if '' in sys.path:
         sys.path.remove('')
 
     try:
-        caller = LocalCaller(config)
+        caller = LocalCaller(CONFIG)
         return caller.call()
     except KeyboardInterrupt as err:
         trace = traceback.format_exc()
         try:
-            hardcrash = options.hard_crash
+            hardcrash = OPTIONS.hard_crash  # pylint: disable=no-member
         except (AttributeError, KeyError):
             hardcrash = False
         _handle_interrupt(
@@ -352,7 +334,7 @@ def salt_call():
             err,
             hardcrash, trace=trace)
 
-class LocalCaller(object):
+class LocalCaller(object): # pylint: disable=too-few-public-methods
     '''
     Object to wrap the calling of local salt modules for testing
     Stripping down bits of the ZeroMQCaller
@@ -366,13 +348,13 @@ class LocalCaller(object):
         # Handle this here so other deeper code which might
         # be imported as part of the salt api doesn't do  a
         # nasty sys.exit() and tick off our developer users
-        global options
         try:
             # grains get loaded below
             # via salt.minion.SMinion, then via salt.loader.grains()
-            self.minion = salt.minion.SMinion(config)
+            self.minion = salt.minion.SMinion(self.config)
             # Then we can overwrite it
-            self.minion.opts['grains'] = get_grains_from_file("{}/grains.json".format(options.test_conf_dir))
+            self.minion.opts['grains'] = get_grains_from_file(
+                "{}/grains.json".format(OPTIONS.test_conf_dir))
         except SaltClientError as exc:
             raise SystemExit(str(exc))
 
@@ -383,10 +365,6 @@ class LocalCaller(object):
         ret = {}
         fun = self.config['fun']
         ret['jid'] = '{0:%Y%m%d%H%M%S%f}'.format(datetime.datetime.now())
-        # proc_fn = os.path.join(
-        #     salt.minion.get_proc_dir(self.config['cachedir']),
-        #     ret['jid']
-        # )
         sdata = {
             'fun': fun,
             'pid': os.getpid(),
@@ -424,7 +402,7 @@ class LocalCaller(object):
         return ret
 
 
-def test_show_sls(func, mods, saltenv='base', test=None, queue=False, **kwargs):
+def test_show_sls(func, mods, saltenv='base', test=None, queue=False, **kwargs): # pylint: disable=unused-argument
     '''
     The salt.state.show_sls() doesn't provide a way to pass in grains,
     it'll only read them from a minion config if that option is
@@ -463,18 +441,17 @@ def test_show_sls(func, mods, saltenv='base', test=None, queue=False, **kwargs):
         return errors
     return high_
 
-
 def check_single_state(state, test_all_keys):
     '''
     state is a tuple of state name, and path to the state in the repo
     '''
-    config['arg']            = [state[0]]
-    config['state_test_dir'] = "{}/test".format(os.path.abspath(os.path.dirname(state[1])))
+    CONFIG['arg']            = [state[0]]
+    CONFIG['state_test_dir'] = "{}/test".format(os.path.abspath(os.path.dirname(state[1])))
     call_result              = salt_call()
 
     # Given path/to/somestate.sls, create path/to/test/somestate.json
     state_name = state[1].split("/")[-1].split('.')[0]
-    desired_filename = "{}/{}.json".format(config['state_test_dir'], state_name)
+    desired_filename = "{}/{}.json".format(CONFIG['state_test_dir'], state_name)
 
     test_result = json.loads(json.dumps(call_result['return']))
     desired_result = json.load(open(desired_filename))
@@ -502,9 +479,9 @@ def print_state_json(state):
     """
     Print out the json representaiton of the state to use as a test result
     """
-    global config
-    config['arg'] = [state[0]]
-    config['state_test_dir'] = "{}/test".format(os.path.abspath(os.path.dirname(state[1])))
+    global CONFIG # pylint: disable=global-variable-not-assigned
+    CONFIG['arg'] = [state[0]]
+    CONFIG['state_test_dir'] = "{}/test".format(os.path.abspath(os.path.dirname(state[1])))
     call_result = salt_call()
     print(json.dumps(call_result['return'], sort_keys=True, indent=4))
 
@@ -521,18 +498,21 @@ def set_config_and_grains():
     from the config.yaml
 
     """
-    global config
-    global options
+    global CONFIG    # pylint: disable=global-variable-not-assigned
+    global OPTIONS   # pylint: disable=global-variable-not-assigned
     # The directory where this script lives, and where config will be
     test_conf_dir = os.path.abspath(os.path.dirname(sys.argv[0]))
-    options.test_conf_dir = test_conf_dir
+    # pylint: disable=attribute-defined-outside-init
+    OPTIONS.test_conf_dir = test_conf_dir
     with open('{}/config.json'.format(test_conf_dir)) as conf_fh:
         test_conf = json.load(conf_fh)
-    config['grains'] = get_grains_from_file('{}/grains.json'.format(test_conf_dir))
+    CONFIG['grains'] = get_grains_from_file('{}/grains.json'.format(test_conf_dir))
 
     # Configure the file_roots now that we have our configuration loaded
-    options.file_root = os.path.abspath("{}/../{}".format(test_conf_dir, test_conf['states_dir']))
-    config['file_roots'] = {'base': [options.file_root]}
+    # pylint: disable=attribute-defined-outside-init
+    OPTIONS.file_root = os.path.abspath("{}/../{}".format(
+        test_conf_dir, test_conf['states_dir']))
+    CONFIG['file_roots'] = {'base': [OPTIONS.file_root]}
     return test_conf
 
 def main():

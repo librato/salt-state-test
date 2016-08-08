@@ -128,6 +128,7 @@ OPTIONS = ConfObj(
 
 # pylint: disable=line-too-long
 CONFIG = {
+    'pillar_cache': False,
     'output_file_append': False,
     'ioflo_realtime': True,
     'master_alive_interval': 0,
